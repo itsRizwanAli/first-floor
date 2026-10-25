@@ -290,11 +290,14 @@ float wwN(vec2 p){ vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
 }
 const matCache = new Map();
 const emissiveMats = { lamp: [], cove: [] };
+const floorMaterials = [];
+const wallMaterials = [];
 const texLoader = new THREE.TextureLoader();
 function materialFor(name, objName) {
+  let m;
   if (LIGHTMAPS[objName]) {                                    // own material instance carrying this mesh's GI bake
     bakedMode = true;
-    const m = MATERIALS[name] ? MATERIALS[name]() : std({ color: 0xcccccc });
+    m = MATERIALS[name] ? MATERIALS[name]() : std({ color: 0xcccccc });
     bakedMode = false;
     const t = texLoader.load('lightmaps/' + LIGHTMAPS[objName]);
     t.flipY = false;
@@ -302,15 +305,18 @@ function materialFor(name, objName) {
     t.colorSpace = THREE.SRGBColorSpace;
     m.aoMap = t;
     m.aoMapIntensity = 1;
-    return m;
+  } else {
+    if (!matCache.has(name)) {
+      m = MATERIALS[name] ? MATERIALS[name]() : std({ color: 0xcccccc });
+      if (name === 'LampShade') emissiveMats.lamp.push(m);
+      if (name === 'CoveLED') emissiveMats.cove.push(m);
+      matCache.set(name, m);
+    }
+    m = matCache.get(name);
   }
-  if (!matCache.has(name)) {
-    const m = MATERIALS[name] ? MATERIALS[name]() : std({ color: 0xcccccc });
-    if (name === 'LampShade') emissiveMats.lamp.push(m);
-    if (name === 'CoveLED') emissiveMats.cove.push(m);
-    matCache.set(name, m);
-  }
-  return matCache.get(name);
+  if (name === 'TileBeige' || name === 'Marble') floorMaterials.push(m);
+  if (name === 'Cream') wallMaterials.push(m);
+  return m;
 }
 
 // ------------------------------------------------------------------ load the Blender house
@@ -481,9 +487,10 @@ function applySun(t) {
   hemi.color.copy(skyCol).lerp(sunCol, 0.4);
   hemi.intensity = THREE.MathUtils.lerp(0.05, 0.02, dusk);
 
-  for (const l of roomLights) l.intensity = THREE.MathUtils.lerp(0, 3.0, dusk);
-  for (const m of emissiveMats.lamp) m.emissiveIntensity = dusk * 0.9;
-  for (const m of emissiveMats.cove) m.emissiveIntensity = dusk * 2.2;
+  const lightBoost = roomLightsOn ? 3.5 : 0;
+  for (const l of roomLights) l.intensity = Math.max(THREE.MathUtils.lerp(0, 3.0, dusk), lightBoost);
+  for (const m of emissiveMats.lamp) m.emissiveIntensity = Math.max(dusk * 0.9, roomLightsOn ? 1.5 : 0);
+  for (const m of emissiveMats.cove) m.emissiveIntensity = Math.max(dusk * 2.2, roomLightsOn ? 2.8 : 0);
 
   cloudMat.uniforms.sunDir.value.copy(sunDir);
   cloudMat.uniforms.sunColor.value.copy(sunCol).multiplyScalar(4.5 * Math.max(above, 0.15));
@@ -602,6 +609,75 @@ function setPlaying(p) {
 }
 $('play').addEventListener('click', () => setPlaying(!params.playing));
 setPlaying(true);
+let roomLightsOn = false;
+
+function setFloorStyle(style) {
+  for (const m of floorMaterials) {
+    if (style === 'terracotta') {
+      m.map = TX.terracotta;
+      m.roughnessMap = TX.terracottaRough;
+      m.color.setHex(0xffffff);
+      m.roughness = 0.9;
+    } else if (style === 'marble') {
+      m.map = TX.marble;
+      m.roughnessMap = TX.marbleRough;
+      m.color.setHex(0xffffff);
+      m.roughness = 0.18;
+    } else if (style === 'beige') {
+      m.map = TX.floor;
+      m.roughnessMap = TX.floorRough;
+      m.color.setHex(0xffffff);
+      m.roughness = 0.35;
+    } else if (style === 'wood') {
+      m.map = TX.wood;
+      m.roughnessMap = TX.woodRough;
+      m.color.setHex(0xb8642c);
+      m.roughness = 0.45;
+    } else if (style === 'slate') {
+      m.map = TX.concrete;
+      m.roughnessMap = null;
+      m.color.setHex(0x35383d);
+      m.roughness = 0.65;
+    }
+    m.needsUpdate = true;
+  }
+}
+
+function setWallColor(colorKey) {
+  const colors = {
+    cream: 0xf0dfc4,
+    white: 0xf5f5f5,
+    sage: 0x8fa88c,
+    sand: 0xd6c0a0,
+    charcoal: 0x3e4042,
+  };
+  const hex = colors[colorKey] || 0xf0dfc4;
+  for (const m of wallMaterials) {
+    m.color.setHex(hex);
+    m.needsUpdate = true;
+  }
+}
+
+const btnLights = $('btn-lights');
+if (btnLights) {
+  btnLights.addEventListener('click', () => {
+    roomLightsOn = !roomLightsOn;
+    btnLights.textContent = roomLightsOn ? '💡 Lights: ON' : '💡 Lights: OFF';
+    btnLights.style.background = roomLightsOn ? 'rgba(233,180,106,.45)' : 'rgba(233,180,106,.14)';
+    applySun(params.time);
+  });
+}
+
+const floorSelect = $('floor-select');
+if (floorSelect) {
+  floorSelect.addEventListener('change', (e) => setFloorStyle(e.target.value));
+}
+
+const wallSelect = $('wall-select');
+if (wallSelect) {
+  wallSelect.addEventListener('change', (e) => setWallColor(e.target.value));
+}
+
 $('enter').addEventListener('click', () => {
   document.body.classList.add('started');
   canvas.requestPointerLock?.();
