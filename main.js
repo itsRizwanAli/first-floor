@@ -331,7 +331,22 @@ const LIGHTMAPS = await fetch('lightmaps/index.json').then((r) => (r.ok ? r.json
 const house = gltf.scene;
 const focusTargets = [];
 const fans = [];
+// Remove misplaced tree in front of room 1 door (x = 0.4, z = -0.72)
+const REMOVE_X = 0.4, REMOVE_Z = -0.72;
 house.traverse((o) => {
+  if (o.isMesh && (o.name.includes('Plants') || o.name.includes('Furniture__Terracotta'))) {
+    const posAttr = o.geometry.attributes.position;
+    if (posAttr) {
+      for (let i = 0; i < posAttr.count; i++) {
+        const vx = posAttr.getX(i);
+        const vz = posAttr.getZ(i);
+        if (Math.hypot(vx - REMOVE_X, vz - REMOVE_Z) < 0.65) {
+          posAttr.setY(i, -100);
+        }
+      }
+      posAttr.needsUpdate = true;
+    }
+  }
   if (o.name.startsWith('Fan_')) fans.push(o);
   if (!o.isMesh) return;
   const name = o.material.name;
@@ -342,6 +357,29 @@ house.traverse((o) => {
   if (name === 'Glass') o.renderOrder = 2;
   if (solid) focusTargets.push(o);
 });
+
+// Remove doorway collider
+colliders.boxes = colliders.boxes.filter(([x0, x1, z0, z1]) => {
+  const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2;
+  return Math.hypot(cx - REMOVE_X, cz - REMOVE_Z) > 0.4;
+});
+
+// Add missing tree wood trunks to connect pot soil to tree foliage
+const treeCoords = [
+  [-5.3, -5.8],
+  [0.35, 4.85],
+  [-5.45, -0.35],
+];
+const trunkGeo = new THREE.CylinderGeometry(0.022, 0.026, 0.38, 12);
+const trunkMat = std({ color: 0x5a3e28, roughness: 0.9 });
+for (const [tx, tz] of treeCoords) {
+  const trunk = new THREE.Mesh(trunkGeo, trunkMat);
+  trunk.position.set(tx, 0.52, tz);
+  trunk.castShadow = true;
+  trunk.receiveShadow = true;
+  scene.add(trunk);
+}
+
 scene.add(house);
 
 // ------------------------------------------------------------------ dust motes
@@ -611,7 +649,18 @@ $('play').addEventListener('click', () => setPlaying(!params.playing));
 setPlaying(true);
 let roomLightsOn = false;
 
+const floorPicker = $('floor-picker');
+const wallPicker = $('wall-picker');
+
 function setFloorStyle(style) {
+  const hexMap = {
+    terracotta: '#c45a30',
+    marble: '#f2f2f0',
+    beige: '#e8dcce',
+    wood: '#b8642c',
+    slate: '#35383d',
+  };
+  if (floorPicker && hexMap[style]) floorPicker.value = hexMap[style];
   for (const m of floorMaterials) {
     if (style === 'terracotta') {
       m.map = TX.terracotta;
@@ -645,17 +694,36 @@ function setFloorStyle(style) {
 
 function setWallColor(colorKey) {
   const colors = {
-    cream: 0xf0dfc4,
-    white: 0xf5f5f5,
-    sage: 0x8fa88c,
-    sand: 0xd6c0a0,
-    charcoal: 0x3e4042,
+    cream: '#f0dfc4',
+    white: '#f5f5f5',
+    sage: '#8fa88c',
+    sand: '#d6c0a0',
+    charcoal: '#3e4042',
   };
-  const hex = colors[colorKey] || 0xf0dfc4;
+  const hex = colors[colorKey] || '#f0dfc4';
+  if (wallPicker) wallPicker.value = hex;
   for (const m of wallMaterials) {
-    m.color.setHex(hex);
+    m.color.set(hex);
     m.needsUpdate = true;
   }
+}
+
+if (floorPicker) {
+  floorPicker.addEventListener('input', (e) => {
+    for (const m of floorMaterials) {
+      m.color.set(e.target.value);
+      m.needsUpdate = true;
+    }
+  });
+}
+
+if (wallPicker) {
+  wallPicker.addEventListener('input', (e) => {
+    for (const m of wallMaterials) {
+      m.color.set(e.target.value);
+      m.needsUpdate = true;
+    }
+  });
 }
 
 const btnLights = $('btn-lights');
